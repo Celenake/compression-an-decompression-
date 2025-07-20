@@ -1,0 +1,84 @@
+from PIL import Image
+import numpy as np
+import os
+
+# ================ CORE FUNCTIONS 
+def image_to_runs(image_path):
+    """Convert image to run-length encoded pixels"""
+    img = Image.open(image_path).convert('1')
+    pixels = np.array(img).flatten()
+    runs = []
+    current_val, count = pixels[0], 1
+    for pixel in pixels[1:]:
+        if pixel == current_val:
+            count += 1
+        else:
+            runs.append((count, int(current_val)))
+            current_val, count = pixel, 1
+    runs.append((count, int(current_val)))
+    return runs
+
+def golomb_rice_encode(run_length, k=4):
+    """Encodes a run length using Golomb-Rice"""
+    q = run_length // (2 ** k)
+    r = run_length % (2 ** k)
+    return '1' * q + '0' + format(r, f'0{k}b')
+
+# ================ COMPRESSION ================
+def compress_image(image_path, output_file="compressed.bin", k=4):
+    runs = image_to_runs(image_path)
+    compressed_bits = ''.join([golomb_rice_encode(length, k) + str(value) 
+                             for length, value in runs])
+    
+    with open(output_file, 'wb') as f:
+        num_bytes = (len(compressed_bits) + 7) // 8
+        f.write(int(compressed_bits, 2).to_bytes(num_bytes, 'big'))
+    print(f"✅ Compression successful! Saved to {output_file}")
+    return runs
+
+# ================ DECOMPRESSION ================
+def decompress_image(compressed_file, output_image, k=4, original_size=(800,600)):
+    with open(compressed_file, 'rb') as f:
+        bytes_data = f.read()
+    
+    bitstring = ''.join([format(byte, '08b') for byte in bytes_data])
+    
+    runs = []
+    i = 0
+    while i < len(bitstring):
+        q_end = bitstring.find('0', i)
+        if q_end == -1: break
+        
+        q = q_end - i
+        r_start = q_end + 1
+        r = int(bitstring[r_start:r_start+k], 2)
+        run_length = q * (2 ** k) + r
+        
+        pixel_value = int(bitstring[r_start + k])
+        runs.append((run_length, pixel_value))
+        i = r_start + k + 1
+    
+    pixels = []
+    for length, value in runs:
+        pixels.extend([value] * length)
+    
+    img = Image.new('1', original_size)
+    img.putdata(pixels[:original_size[0]*original_size[1]])
+    img.save(output_image)
+    print(f"✅ Decompression successful! Saved to {output_image}")
+
+# ================ MAIN EXECUTION ================
+if __name__ == "__main__":
+    INPUT_IMAGE = "black and white.tif"
+    COMPRESSED_FILE = "compressed.bin"
+    
+    with Image.open(INPUT_IMAGE) as img:
+        original_size = img.size
+    
+    print("🔄 Compressing image...")
+    runs = compress_image(INPUT_IMAGE, COMPRESSED_FILE, k=4)
+    print(f"First 5 runs: {runs[:5]}")
+    
+    DECOMPRESSED_IMAGE = "decompressed.tif"
+    print("\n🔄 Decompressing image...")
+    decompress_image(COMPRESSED_FILE, DECOMPRESSED_IMAGE, k=4, original_size=original_size)
